@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"file-clone-validator/core/metadata"
+	"github.com/cheggaaa/pb/v3"
 	"golang.org/x/sync/errgroup"
 	"log/slog"
 	"os"
@@ -87,9 +88,12 @@ type MetaWriterImpl struct {
 }
 
 func (w *MetaWriterImpl) Write(ctx context.Context, in <-chan *metadata.Meta, workerCount int) error {
-	slog.Info("Start writing metadata:", slog.Int("WriterCount", workerCount))
-
 	defer os.RemoveAll(w.OutputTempDir)
+
+	slog.Info("Start to write metadata to temp file:", slog.String("OutputDir", w.OutputDir))
+	bar := pb.New64(0) // `0` for indefinite mode
+	bar.Start()
+
 	group, groupCtx := errgroup.WithContext(ctx)
 	for i := 0; i < workerCount; i++ {
 		group.Go(func() error {
@@ -117,7 +121,10 @@ func (w *MetaWriterImpl) Write(ctx context.Context, in <-chan *metadata.Meta, wo
 					if _err != nil {
 						return _err
 					}
-					atomic.AddUint64(&w.ItemCount, 1)
+					{
+						atomic.AddUint64(&w.ItemCount, 1)
+						bar.Increment()
+					}
 				}
 			}
 		})
@@ -126,6 +133,13 @@ func (w *MetaWriterImpl) Write(ctx context.Context, in <-chan *metadata.Meta, wo
 	if err != nil {
 		return err
 	}
+
+	bar.Finish()
+	slog.Info("Finish to write metadata to temp file:", slog.String("OutputDir", w.OutputDir))
+
+	slog.Info("Start to merge temp files to final output:", slog.String("OutputDir", w.OutputDir))
+	bar = pb.New(0)
+	bar.Start()
 
 	outFile, err := os.Create(filepath.Join(w.OutputDir, "meta.out"))
 	if err != nil {
@@ -149,12 +163,13 @@ func (w *MetaWriterImpl) Write(ctx context.Context, in <-chan *metadata.Meta, wo
 	}
 
 	// merge all temp files to final output
-	return filepath.Walk(w.OutputTempDir, func(fp string, info os.FileInfo, err error) error {
+	err = filepath.Walk(w.OutputTempDir, func(fp string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 
 		if !info.IsDir() && strings.HasPrefix(info.Name(), "temp-") {
+			defer bar.Increment() // increment the progress bar when a temp file is merged
 			tempFile, _err := os.Open(fp)
 			if _err != nil {
 				return _err
@@ -179,4 +194,8 @@ func (w *MetaWriterImpl) Write(ctx context.Context, in <-chan *metadata.Meta, wo
 
 		return nil
 	})
+
+	bar.Finish()
+	slog.Info("Finish to merge temp files to final output:", slog.String("OutputDir", w.OutputDir))
+	return err
 }

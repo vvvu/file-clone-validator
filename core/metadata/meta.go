@@ -136,6 +136,28 @@ type Meta struct {
 	ExtendedAttributes ExtendedAttributes
 }
 
+func (m *Meta) Equals(other *Meta) (reasons []string) {
+	reasons = append(reasons, m.Common.Equals(&other.Common)...)
+	if m.FileSystem != nil && other.FileSystem != nil {
+		reasons = append(reasons, m.FileSystem.Equals(other.FileSystem)...)
+	} else if m.FileSystem == nil || other.FileSystem == nil {
+		// do nothing
+	} else {
+		reasons = append(reasons, "file system meta: one is nil, the other is not")
+	}
+
+	if m.ObjectStorage != nil && other.ObjectStorage != nil {
+		reasons = append(reasons, m.ObjectStorage.Equals(other.ObjectStorage)...)
+	} else if m.ObjectStorage == nil || other.ObjectStorage == nil {
+		// do nothing
+	} else {
+		reasons = append(reasons, "object storage meta: one is nil, the other is not")
+	}
+	reasons = append(reasons, m.ExtendedAttributes.Equals(other.ExtendedAttributes)...)
+
+	return reasons
+}
+
 // CommonAttrs captures attributes that are common across different storage systems.
 type CommonAttrs struct {
 	// Path is the full source path to the file including the file name. It can be used to
@@ -153,6 +175,22 @@ type CommonAttrs struct {
 	// in any security-sensitive applications. It's vulnerable to hash collisions. However, it's still useful for
 	// detecting accidental data corruption in current use cases.
 	Hash string
+}
+
+func (ca *CommonAttrs) Equals(other *CommonAttrs) (reasons []string) {
+	if ca.Name != other.Name {
+		reasons = append(reasons, fmt.Sprintf("name: %s != %s", ca.Name, other.Name))
+	}
+
+	if ca.Size != other.Size {
+		reasons = append(reasons, fmt.Sprintf("size: %d != %d", ca.Size, other.Size))
+	}
+
+	if ca.Hash != other.Hash {
+		reasons = append(reasons, fmt.Sprintf("hash: %s != %s", ca.Hash, other.Hash))
+	}
+
+	return reasons
 }
 
 // FileSystemAttrs captures file-system-specific attributes.
@@ -186,6 +224,41 @@ type FileSystemAttrs struct {
 	LinkTarget string
 }
 
+func (fa *FileSystemAttrs) Equals(other *FileSystemAttrs) (reasons []string) {
+	if fa.Type == other.Type && fa.Type == FSTypeSocket {
+		return []string{fmt.Sprintf("ignore type: %s", fa.Type)}
+	}
+	if fa.Type != other.Type {
+		reasons = append(reasons, fmt.Sprintf("type: %s != %s", fa.Type, other.Type))
+	}
+
+	if fa.Mode != other.Mode {
+		reasons = append(reasons, fmt.Sprintf("mode: %s != %s", fa.Mode, other.Mode))
+	}
+
+	if fa.ModTime != other.ModTime {
+		reasons = append(reasons, fmt.Sprintf("modTime: %d != %d", fa.ModTime, other.ModTime))
+	}
+
+	if fa.UID != other.UID {
+		reasons = append(reasons, fmt.Sprintf("uid: %d != %d", fa.UID, other.UID))
+	}
+
+	if fa.GID != other.GID {
+		reasons = append(reasons, fmt.Sprintf("gid: %d != %d", fa.GID, other.GID))
+	}
+
+	if fa.Links != other.Links {
+		reasons = append(reasons, fmt.Sprintf("links: %d != %d", fa.Links, other.Links))
+	}
+
+	if fa.LinkTarget != other.LinkTarget {
+		reasons = append(reasons, fmt.Sprintf("linkTarget: %s != %s", fa.LinkTarget, other.LinkTarget))
+	}
+
+	return reasons
+}
+
 // ObjectStorageAttrs captures object-storage-specific attributes.
 type ObjectStorageAttrs struct {
 	// StorageClass is the storage class of the object.
@@ -195,6 +268,18 @@ type ObjectStorageAttrs struct {
 	LastModified uint64
 }
 
+func (oa *ObjectStorageAttrs) Equals(other *ObjectStorageAttrs) (reasons []string) {
+	if oa.StorageClass != other.StorageClass {
+		reasons = append(reasons, fmt.Sprintf("storageClass: %s != %s", oa.StorageClass, other.StorageClass))
+	}
+
+	if oa.LastModified != other.LastModified {
+		reasons = append(reasons, fmt.Sprintf("lastModified: %d != %d", oa.LastModified, other.LastModified))
+	}
+
+	return reasons
+}
+
 // ExtendedAttribute captures the key-value pair of an extended attribute.
 type ExtendedAttribute struct {
 	Key   string
@@ -202,3 +287,22 @@ type ExtendedAttribute struct {
 }
 
 type ExtendedAttributes []ExtendedAttribute
+
+func (eas ExtendedAttributes) Equals(other ExtendedAttributes) (reasons []string) {
+	if len(eas) != len(other) {
+		reasons = append(reasons, fmt.Sprintf("length: %d != %d", len(eas), len(other)))
+		return reasons
+	}
+
+	for i := range eas {
+		if eas[i].Key != other[i].Key {
+			reasons = append(reasons, fmt.Sprintf("key: %s != %s", eas[i].Key, other[i].Key))
+		}
+
+		if string(eas[i].Value) != string(other[i].Value) {
+			reasons = append(reasons, fmt.Sprintf("value: %s != %s", eas[i].Value, other[i].Value))
+		}
+	}
+
+	return reasons
+}

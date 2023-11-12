@@ -3,6 +3,7 @@ package datasource
 import (
 	"context"
 	"file-clone-validator/core/metadata"
+	"file-clone-validator/core/utils"
 	"golang.org/x/sync/errgroup"
 	"log/slog"
 	"os"
@@ -46,8 +47,12 @@ func NewFileSource(root string) (DataSource, error) {
 // multiple workers to improve the performance.
 func (fs *FileSource) Walk(ctx context.Context, outDir string, out chan<- *metadata.Meta, workerCount int) error {
 	slog.Info("Start walking the file system:", slog.Int("WorkerCount", workerCount))
-	slog.Info("Output dir will not be included in the walking process:", slog.String("OutputDir", outDir))
 	defer close(out) // close the output channel when done
+
+	outputTempPath, err := utils.GetTempPath(outDir)
+	if err != nil {
+		return err
+	}
 
 	itemC := make(chan *FileItem, 1)
 
@@ -59,9 +64,20 @@ func (fs *FileSource) Walk(ctx context.Context, outDir string, out chan<- *metad
 				return err
 			}
 
-			if path == fs.root || path == outDir { // skip the root directory and the output directory
+			// filter paths
+			if path == fs.root { // skip the root directory
 				return nil
 			}
+
+			isTemp, err := utils.IsSubPath(outputTempPath, path)
+			if err != nil {
+				return err
+			}
+
+			if isTemp { // skip the temp directory
+				return nil
+			}
+			// end of filter paths
 
 			select {
 			case <-groupCtx.Done():
