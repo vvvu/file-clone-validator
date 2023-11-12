@@ -1,4 +1,6 @@
 # file-clone-validator
 File migration validation tool
 
-- [] Progress bar for generating and validating
+Known issues:
+- [] high `wa` value using `top` command.
+- [] low performance when dealing with medium size files (>=10M)
