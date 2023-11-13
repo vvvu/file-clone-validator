@@ -11,7 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
+	"time"
 )
 
 // DataSource indicates the source of the data before it is copied to the destination
@@ -91,12 +91,19 @@ func (w *MetaWriterImpl) Write(ctx context.Context, in <-chan *metadata.Meta, wo
 	defer os.RemoveAll(w.OutputTempDir)
 
 	slog.Info("Start to write metadata to temp file:", slog.String("OutputDir", w.OutputDir))
-	bar := pb.New64(0) // `0` for indefinite mode
-	bar.Start()
+
+	itemCounts := make([]uint64, workerCount) // to store the number of items written by each worker
 
 	group, groupCtx := errgroup.WithContext(ctx)
+
+	go GenerateProgressWatch(groupCtx, itemCounts)
+	// monitor the progress of the metadata generation
+	// the lifetime of the progress bar is the same as the lifetime of the metadata generation
+
 	for i := 0; i < workerCount; i++ {
+		_i := i
 		group.Go(func() error {
+			defer func() { w.ItemCount += itemCounts[_i] }()
 			tempFile, err := os.CreateTemp(w.OutputTempDir, "temp-*")
 			if err != nil {
 				return err
@@ -121,10 +128,8 @@ func (w *MetaWriterImpl) Write(ctx context.Context, in <-chan *metadata.Meta, wo
 					if _err != nil {
 						return _err
 					}
-					{
-						atomic.AddUint64(&w.ItemCount, 1)
-						bar.Increment()
-					}
+
+					itemCounts[_i]++
 				}
 			}
 		})
@@ -134,12 +139,9 @@ func (w *MetaWriterImpl) Write(ctx context.Context, in <-chan *metadata.Meta, wo
 		return err
 	}
 
-	bar.Finish()
-	slog.Info("Finish to write metadata to temp file:", slog.String("OutputDir", w.OutputDir))
+	slog.Info("Finish to write metadata to temp output file:", slog.String("OutputDir", w.OutputDir))
 
 	slog.Info("Start to merge temp files to final output:", slog.String("OutputDir", w.OutputDir))
-	bar = pb.New(0)
-	bar.Start()
 
 	outFile, err := os.Create(filepath.Join(w.OutputDir, "meta.out"))
 	if err != nil {
@@ -169,7 +171,6 @@ func (w *MetaWriterImpl) Write(ctx context.Context, in <-chan *metadata.Meta, wo
 		}
 
 		if !info.IsDir() && strings.HasPrefix(info.Name(), "temp-") {
-			defer bar.Increment() // increment the progress bar when a temp file is merged
 			tempFile, _err := os.Open(fp)
 			if _err != nil {
 				return _err
@@ -195,7 +196,37 @@ func (w *MetaWriterImpl) Write(ctx context.Context, in <-chan *metadata.Meta, wo
 		return nil
 	})
 
-	bar.Finish()
 	slog.Info("Finish to merge temp files to final output:", slog.String("OutputDir", w.OutputDir))
 	return err
+}
+
+// GenerateProgressWatch generates a progress bar to watch the progress of the metadata generation
+// Input:
+// - itemCounts: the number of items written by each worker. This function will not modify the values of this slice
+// but will read the values to calculate the total number of items written
+func GenerateProgressWatch(ctx context.Context, itemCounts []uint64) {
+	bar := pb.New64(0) // `0` for indefinite mode
+	bar.Start()
+	defer bar.Finish()
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			var total uint64
+			for _, itemCount := range itemCounts {
+				total += itemCount
+			}
+			bar.SetCurrent(int64(total))
+			return
+		case <-ticker.C:
+			var total uint64
+			for _, itemCount := range itemCounts {
+				total += itemCount
+			}
+			bar.SetCurrent(int64(total))
+		}
+	}
 }

@@ -2,8 +2,8 @@ package main
 
 import (
 	"file-clone-validator/cmd"
+	"fmt"
 	"github.com/spf13/cobra"
-	"log/slog"
 	"os"
 )
 
@@ -13,7 +13,7 @@ func main() {
 	rootCmd.AddCommand(cmd.ValidateCmd)
 
 	if err := rootCmd.Execute(); err != nil {
-		slog.Error("Failed to execute command:", slog.Any("error", err))
+		fmt.Fprintf(os.Stderr, "Failed to execute command: %v\n", err)
 		os.Exit(1)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"file-clone-validator/core/datasource"
 	"file-clone-validator/core/metadata"
 	"fmt"
@@ -14,7 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
+	"time"
 )
 
 type FileValidator struct {
@@ -26,6 +25,10 @@ func NewFileValidator(targetDir string, reporter *Reporter) (Validator, error) {
 	targetDir, err := filepath.Abs(targetDir)
 	if err != nil {
 		return nil, err
+	}
+
+	if _, err = os.Stat(targetDir); err != nil {
+		return nil, fmt.Errorf("failed to stat target directory: %w", err)
 	}
 	return &FileValidator{targetDir: targetDir, reporter: reporter}, nil
 }
@@ -53,15 +56,16 @@ func (fv *FileValidator) Validate(ctx context.Context, filePath string, workerCo
 		break
 	}
 
-	itemCount := uint64(0)
+	itemCounts := make([]uint64, workerCount)
 
 	slog.Info("Start to validate metadata file:", slog.String("MetaFilePath", filePath))
-	bar := pb.New64(int64(srcHeader.ItemCount))
-	bar.Start()
 
 	// validate the metadata file
 	rowC := make(chan []byte, 1)
 	group, groupCtx := errgroup.WithContext(ctx)
+
+	go ValidateProgressWatch(groupCtx, int64(srcHeader.ItemCount), itemCounts)
+
 	group.Go(func() error {
 		defer close(rowC)
 		for s.Scan() {
@@ -75,6 +79,7 @@ func (fv *FileValidator) Validate(ctx context.Context, filePath string, workerCo
 	})
 
 	for i := 0; i < workerCount; i++ {
+		_i := i
 		group.Go(func() error {
 			for {
 				select {
@@ -84,7 +89,6 @@ func (fv *FileValidator) Validate(ctx context.Context, filePath string, workerCo
 					if !ok {
 						return nil
 					}
-					bar.Increment()
 
 					item := metadata.Meta{}
 					err = json.Unmarshal(row, &item)
@@ -93,7 +97,7 @@ func (fv *FileValidator) Validate(ctx context.Context, filePath string, workerCo
 						continue
 					}
 
-					atomic.AddUint64(&itemCount, 1)
+					itemCounts[_i]++
 
 					targetPath := strings.Replace(item.Common.Path, srcHeader.SourceDir, fv.targetDir, 1)
 					file, _err := os.Open(targetPath)
@@ -129,12 +133,42 @@ func (fv *FileValidator) Validate(ctx context.Context, filePath string, workerCo
 		return err
 	}
 
-	bar.Finish()
 	slog.Info("Finish to validate metadata file:", slog.String("MetaFilePath", filePath))
 
-	if itemCount != srcHeader.ItemCount {
-		return errors.New("item count mismatch")
+	var totalCount uint64
+	for _, itemCount := range itemCounts {
+		totalCount += itemCount
+	}
+	if totalCount != srcHeader.ItemCount {
+		return fmt.Errorf("item count mismatch. expect %d, got %d", srcHeader.ItemCount, totalCount)
 	}
 
 	return nil
+}
+
+func ValidateProgressWatch(ctx context.Context, total int64, itemCounts []uint64) {
+	bar := pb.New64(total)
+	bar.Start()
+	defer bar.Finish()
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			var totalCount uint64
+			for _, itemCount := range itemCounts {
+				totalCount += itemCount
+			}
+			bar.SetCurrent(int64(totalCount))
+			return
+		case <-ticker.C:
+			var totalCount uint64
+			for _, itemCount := range itemCounts {
+				totalCount += itemCount
+			}
+			bar.SetCurrent(int64(totalCount))
+		}
+	}
 }

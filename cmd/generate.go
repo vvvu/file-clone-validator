@@ -37,11 +37,11 @@ var (
 			}
 
 			if readerCount < 1 {
-				fmt.Errorf("reader count must be greater than 0. got %d", readerCount)
+				return fmt.Errorf("reader count must be greater than 0. got %d", readerCount)
 			}
 
 			if writerCount < 1 {
-				fmt.Errorf("writer count must be greater than 0. got %d", writerCount)
+				return fmt.Errorf("writer count must be greater than 0. got %d", writerCount)
 			}
 
 			if generateType != FS && generateType != OSS {
@@ -92,7 +92,7 @@ var (
 func initGenerateCmd() {
 	GenerateCmd.PersistentFlags().StringVarP(&sourceDir, "source", "s", "", "source directory or storage bucket name")
 	GenerateCmd.PersistentFlags().StringVarP(&outputDir, "output", "o", "", "output directory path")
-	GenerateCmd.PersistentFlags().IntVarP(&readerCount, "reader", "r", 1, "number of meta reader to use")
-	GenerateCmd.PersistentFlags().IntVarP(&writerCount, "writer", "w", 1, "number of meta writer to use")
+	GenerateCmd.PersistentFlags().IntVarP(&readerCount, "reader", "r", 1, "number of reader to open and load file meta")
+	GenerateCmd.PersistentFlags().IntVarP(&writerCount, "writer", "w", 1, "number of writer to write meta to file")
 	GenerateCmd.PersistentFlags().StringVarP((*string)(&generateType), "type", "t", "fs", "type of data source to use")
 }

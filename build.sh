@@ -5,7 +5,7 @@
 
 # Not all combinations are valid. If you want to add more platforms, make sure
 # the core/metadata/meta_{OS}.go file implements the new OS.
-PLATFORMS=("linux/amd64" "darwin/amd64" "linux/arm" "linux/arm64")
+PLATFORMS=("linux/amd64" "darwin/amd64" "linux/arm" "linux/arm64" "linux/386")
 # Add more combinations as needed
 
 # Name of the binary
